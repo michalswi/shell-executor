@@ -8,19 +8,18 @@ ARG VERSION
 ARG APPNAME
 
 RUN apk --no-cache add make; \
-    adduser -D -h /dummy dummy
+    adduser -D -h /x x
 
-USER dummy
-WORKDIR /dummy
+USER x
+WORKDIR /x
 
-COPY --chown=dummy Makefile Makefile
-COPY --chown=dummy main.go main.go
-COPY --chown=dummy static static
-COPY --chown=dummy go.sum go.sum
-COPY --chown=dummy go.mod go.mod
+COPY --chown=x Makefile Makefile
+COPY --chown=x main.go main.go
+COPY --chown=x static static
+COPY --chown=x go.sum go.sum
+COPY --chown=x go.mod go.mod
 
 RUN go mod download
-
 RUN make go-build
 
 
@@ -32,14 +31,14 @@ ARG APPNAME
 
 ENV SERVER_PORT ""
 
-# > non-root (root to install packages)
+# root to install packages
 USER root
 RUN apk --no-cache add bind-tools curl
 
-RUN adduser -D -h /dummy dummy
-USER dummy
+RUN adduser -D -h /x x
+USER x
 
-WORKDIR /dummy
-COPY --from=builder /dummy/${APPNAME}-${VERSION} ./${APPNAME}
-COPY --from=builder /dummy/static ./static
+WORKDIR /x
+COPY --from=builder /x/${APPNAME}-${VERSION} ./${APPNAME}
+COPY --from=builder /x/static ./static
 CMD ["./shell-executor"]
