@@ -1,46 +1,75 @@
 package main
 
 import (
-	"bytes"
-	"fmt"
-	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
+
+	"github.com/creack/pty"
+	"github.com/gorilla/websocket"
 )
 
-const formTemplate = `
-<!DOCTYPE html>
-<html>
-<head>
-	<title>shell-executor</title>
-</head>
-<body>
-	<h1>shell executor</h1>
-	<form method="POST" action="/">
-		<label for="command">enter command:</label><br>
-		<input type="text" id="command" name="command" style="width:300px;"><br><br>
-		<input type="submit" value="Run">
-	</form>
-	<h2>output:</h2>
-	<pre>{{.Output}}</pre>
-</body>
-</html>
-`
+var logger = log.New(os.Stdout, "(s)hell-executor ", log.LstdFlags|log.Lshortfile|log.Ltime|log.LUTC)
 
-type CommandResult struct {
-	Output string
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true
+	},
 }
-
-var logger = log.New(os.Stdout, "shell-executor ", log.LstdFlags|log.Lshortfile|log.Ltime|log.LUTC)
 
 func main() {
 	port := getEnv("SERVER_PORT", "8080")
 	http.HandleFunc("/hz", hz)
-	http.HandleFunc("/", commandHandler)
+	http.Handle("/", http.FileServer(http.Dir("./static")))
+	http.HandleFunc("/ws", handleShell)
+
 	logger.Println("Server is ready to handle requests at port", port)
 	logger.Fatal(http.ListenAndServe(":"+port, nil))
+}
+
+func handleShell(w http.ResponseWriter, r *http.Request) {
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		logger.Println("WebSocket upgrade error:", err)
+		return
+	}
+	defer conn.Close()
+
+	// Start shell session
+	cmd := exec.Command("/bin/sh")
+	// Use "cmd.exe" for Windows or "/bin/sh" for minimal shells
+	ptmx, err := pty.Start(cmd)
+	if err != nil {
+		logger.Println("Failed to start shell:", err)
+		return
+	}
+	defer ptmx.Close()
+
+	go func() {
+		for {
+			msgType, msg, err := conn.ReadMessage()
+			if err != nil {
+				logger.Println("WebSocket read error:", err)
+				return
+			}
+			if msgType == websocket.TextMessage {
+				// Send data from WebSocket to shell
+				ptmx.Write(msg)
+			}
+		}
+	}()
+
+	buf := make([]byte, 1024)
+	for {
+		n, err := ptmx.Read(buf)
+		if err != nil {
+			logger.Println("Shell read error:", err)
+			return
+		}
+		// Send shell output to WebSocket
+		conn.WriteMessage(websocket.TextMessage, buf[:n])
+	}
 }
 
 func hz(w http.ResponseWriter, r *http.Request) {
@@ -57,44 +86,4 @@ func getEnv(key, defaultValue string) string {
 		return defaultValue
 	}
 	return value
-}
-
-func commandHandler(w http.ResponseWriter, r *http.Request) {
-	var result CommandResult
-
-	if r.Method == http.MethodPost {
-		command := r.FormValue("command")
-		output, err := executeShellCommand(command)
-		if err != nil {
-			result.Output = fmt.Sprintf("Error: %v\n%s", err, output)
-		} else {
-			result.Output = output
-		}
-	}
-
-	// tmpl := template.Must(template.New("form").Parse(formTemplate))
-	tmpl, err := template.New("form").Parse(formTemplate)
-	if err != nil {
-		http.Error(w, "Failed to parse template", http.StatusInternalServerError)
-		return
-	}
-
-	err = tmpl.Execute(w, result)
-	if err != nil {
-		http.Error(w, "Failed to render template", http.StatusInternalServerError)
-	}
-}
-
-func executeShellCommand(cmd string) (string, error) {
-	command := exec.Command("sh", "-c", cmd)
-	// For Windows, use "cmd" and "/C"
-	var out bytes.Buffer
-	var stderr bytes.Buffer
-	command.Stdout = &out
-	command.Stderr = &stderr
-	err := command.Run()
-	if err != nil {
-		return stderr.String(), err
-	}
-	return out.String(), nil
 }
