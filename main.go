@@ -36,9 +36,10 @@ func handleShell(w http.ResponseWriter, r *http.Request) {
 	}
 	defer conn.Close()
 
-	// Start shell session
 	cmd := exec.Command("/bin/sh")
-	// Use "cmd.exe" for Windows or "/bin/sh" for minimal shells
+	cmd.Env = append(cmd.Env, "HISTFILE=/dev/null")
+	cmd.Env = append(cmd.Env, "HISTSIZE=0")
+
 	ptmx, err := pty.Start(cmd)
 	if err != nil {
 		logger.Println("Failed to start shell:", err)
