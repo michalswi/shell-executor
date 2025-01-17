@@ -32,6 +32,7 @@ docker-build: ## Build docker image
 	--build-arg APPNAME="$(APPNAME)" \
 	--build-arg VERSION="$(VERSION)" \
 	--label="build.version=$(VERSION)" \
+	--platform linux/amd64 \
 	--tag="$(DOCKER_REPO)/$(APPNAME):latest" \
 	.
 
